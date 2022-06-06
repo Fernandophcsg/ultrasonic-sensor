@@ -12,6 +12,10 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define TRIGGER_PIN PA4
+#define ECHO_PIN PD6
+#define ULTRASONIC_INIT() { DDRA |= (1 << TRIGGER_PIN);PORTD |= (1 << ECHO_PIN);}
+
 int TimerOverflow = 0;
 
 ISR(TIMER1_OVF_vect)
@@ -19,47 +23,49 @@ ISR(TIMER1_OVF_vect)
 	TimerOverflow++;	/* Increment Timer Overflow count */
 }
 
-void trigger_and_distance();
+float ultrasonic_getDistance(void);
 
-int main(void){
+int main(void)
+{
+	double distance;
+	char string[10];
 	
-	DDRA = 0x08;		/* Make trigger pin as output */
-	PORTA = 0xFF;		/* Turn on Pull-up */
+	sei();
+	ULTRASONIC_INIT();
 	
 	
-	sei();			
-	TIMSK = (1 << TOIE1);
-	TCCR1A = 0;		
-
 	while(1)
 	{
-		trigger_and_distance();
+		(float)ultrasonic_getDistance();
+		
 	}
-	
 }
-void trigger_and_distance(){
-	long count;
-	double distance;
+float ultrasonic_getDistance(void)
+{
+	TIMSK = (1 << TOIE1);			/* Enable Timer1 overflow interrupts */
+	TCCR1A = 0;						/* Set all bit to zero Normal operation */
 	
-	PORTA |= (1 << 3);
+	PORTA |= (1 << TRIGGER_PIN);/* Give 10us trigger pulse on trig. pin to HC-SR04 */
 	_delay_us(10);
-	PORTA &= (~(1 << 3));
+	PORTA &= (~(1 << TRIGGER_PIN));
 	
-	TCNT1 = 0;
-	TCCR1B = 0x41;
-	TIFR = 1<<ICF1;
-	TIFR = 1<<TOV1;
+	TCNT0 = 0;			/* Clear Timer counter */
+	TCCR1B = 0x41;		/* Setting for capture rising edge, No pre-scaler*/
+	TIFR = 1<<ICF1;		/* Clear ICP flag (Input Capture flag) */
+	TIFR = 1<<TOV1;		/* Clear Timer Overflow flag */
 
+	/*Calculate width of Echo by Input Capture (ICP) on PortD PD6 */
 	
-	while ((TIFR & (1 << ICF1)) == 0);
-	TCNT1 = 0;
-	TCCR1B = 0x01;
-	TIFR = 1<<ICF1;
-	TIFR = 1<<TOV1;
-	TimerOverflow = 0;
+	while ((TIFR & (1 << ICF1)) == 0);	/* Wait for rising edge */
+	TCNT0 = 0;			/* Clear Timer counter */
+	TCCR1B = 0x01;		/* Setting for capture falling edge, No pre-scaler */
+	TIFR = 1<<ICF1;		/* Clear ICP flag (Input Capture flag) */
+	TIFR = 1<<TOV1;		/* Clear Timer Overflow flag */
+	TimerOverflow = 0;	/* Clear Timer overflow count */
 
-	while ((TIFR & (1 << ICF1)) == 0);
-	count = ICR1 + (65535 * TimerOverflow);
+	while ((TIFR & (1 << ICF1)) == 0); /* Wait for falling edge */
+	count = ICR1 + (65535 * TimerOverflow);	/* Take value of capture register */
+	/* 8MHz Timer freq, sound speed =343 m/s*/
 	
-	distance = (double)count / 466.47;
+	return ((float)count / 466.47);
 }
